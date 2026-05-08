@@ -312,7 +312,7 @@ server.on('upgrade', (req, socket, head) => {
     onlineUsers: getOnlineUsers()
   }));
 
-  // Broadcast join
+  // Broadcast joi
   broadcast({
     type: 'user_join',
     user: { name: session.name, color: session.color }
