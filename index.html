@@ -586,9 +586,6 @@ input,textarea,button{font-family:var(--fb);}
         </div>
       </div>
 
-      <!-- Emoji picker -->
-      <div class="ep" id="ep" style="position:relative;"></div>
-
       <!-- Input -->
       <div class="ia" style="position:relative;">
         <div class="ep" id="emoji-picker"></div>
@@ -616,9 +613,11 @@ input,textarea,button{font-family:var(--fb);}
 
 <script>
 // ════════════════════════════════════════════
-//  CONFIG
+//  CONFIG — pointing to Railway backend
 // ════════════════════════════════════════════
-const API = 'https://cacachat-production.up.railway.app/';  // same-origin
+const API = 'https://cacachat-production.up.railway.app';
+const WS_URL = 'wss://cacachat-production.up.railway.app';
+
 const COLORS = [
   'linear-gradient(135deg,#6c63ff,#a855f7)',
   'linear-gradient(135deg,#ec4899,#f97316)',
@@ -635,13 +634,13 @@ const EMOJIS = ['😀','😂','🥹','😍','🤩','😎','🥳','🤔','😅','
 //  STATE
 // ════════════════════════════════════════════
 let token = localStorage.getItem('cacachat_token') || '';
-let me = null;   // { name, email, color, isGuest }
+let me = null;
 let ws = null;
 let wsReady = false;
 let currentRoom = 'general';
-let currentDM = null;   // name of DM partner, null = room chat
+let currentDM = null;
 let typingTimer = null;
-let typingUsers = {};   // { name: timestamp }
+let typingUsers = {};
 let onlineUsers = [];
 let renderedMsgIds = new Set();
 let reconnectTimer = null;
@@ -720,12 +719,10 @@ async function doLogout() {
   closePanel('prof-panel');
   document.getElementById('app').classList.remove('show');
   document.getElementById('auth-screen').style.display = 'flex';
-  // Reset form
   document.getElementById('l-email').value = '';
   document.getElementById('l-pass').value = '';
 }
 
-// Auto-login if token exists
 async function tryAutoLogin() {
   if (!token) return;
   const res = await apiFetch('/api/me');
@@ -743,7 +740,6 @@ function enterApp() {
   setupProfile();
   buildEmojiPicker();
   connectWS();
-  // Default: open general room
   setTimeout(() => openRoom('general'), 300);
 }
 
@@ -764,8 +760,7 @@ function setupProfile() {
 // ════════════════════════════════════════════
 function connectWS() {
   if (ws) { try { ws.close(); } catch {} }
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`wss://cacachat-production.up.railway.app/?token=${token}`);
+  ws = new WebSocket(`${WS_URL}/?token=${token}`);
 
   ws.onopen = () => {
     wsReady = true;
@@ -792,35 +787,28 @@ function handleWS(data) {
       renderOnline();
       renderContacts();
       break;
-
     case 'chat':
       onChatMsg(data.message);
       break;
-
     case 'online_update':
       onlineUsers = data.users || [];
       renderOnline();
       renderContacts();
       break;
-
     case 'user_join':
       showSysMsg(`${data.user.name} joined`);
       break;
-
     case 'user_leave':
       showSysMsg(`${data.user.name} left`);
-      // Clean up typing
       delete typingUsers[data.user.name];
       renderTyping();
       break;
-
     case 'typing':
       if (data.room === currentRoom && data.user !== me.name) {
         typingUsers[data.user] = Date.now();
         renderTyping();
       }
       break;
-
     case 'stop_typing':
       delete typingUsers[data.user];
       renderTyping();
@@ -833,7 +821,7 @@ function wsSend(data) {
 }
 
 // ════════════════════════════════════════════
-//  ROOMS & DMs
+//  ROOMS
 // ════════════════════════════════════════════
 function openRoom(room) {
   currentRoom = room;
@@ -842,26 +830,19 @@ function openRoom(room) {
   const cp = document.getElementById('chat-panel');
   cp.style.display = 'flex';
   renderedMsgIds.clear();
-
-  // Update header
   setHeader('#' + room, 'Channel', null);
-
-  // Update room highlights
   ['general','random'].forEach(r => {
     document.getElementById('room-' + r)?.classList.toggle('active', r === room);
   });
   document.querySelectorAll('.ci').forEach(el => el.classList.remove('active'));
-
-  // Load history
   loadHistory(room);
 }
 
+function switchRoom(room) { openRoom(room); }
+
 function openDM(user) {
-  // DMs not yet persisted to server; show info
   showToast('ℹ️', 'Info', 'DM coming soon! Use #general for now.');
 }
-
-function switchRoom(room) { openRoom(room); }
 
 // ════════════════════════════════════════════
 //  MESSAGES
@@ -883,44 +864,32 @@ function sendMsg() {
   input.value = '';
   autoResize(input);
   wsSend({ type: 'chat', room: currentRoom, text });
-  // DO NOT append locally — server will broadcast back to us too
   stopTyping();
 }
 
 function onChatMsg(msg) {
-  // Deduplicate by message ID
   if (renderedMsgIds.has(msg.id)) return;
   renderedMsgIds.add(msg.id);
-
-  const visible = document.getElementById('chat-panel').style.display !== 'none'
-    && msg.room === currentRoom;
-
+  const visible = document.getElementById('chat-panel').style.display !== 'none' && msg.room === currentRoom;
   if (visible) {
     appendMsg(msg, true);
     const area = document.getElementById('msgs');
     area.scrollTop = area.scrollHeight;
   }
-
-  // Toast if from someone else and not visible
   if (msg.sender !== me.name && !visible) {
     showToast(COLORS[msg.senderColor % COLORS.length], msg.sender, msg.text);
   }
-
-  // Sound
   if (msg.sender !== me.name) playSound();
 }
 
 function appendMsg(msg, animate) {
   const isMine = msg.sender === me.name;
   const area = document.getElementById('msgs');
-
   const grp = document.createElement('div');
   grp.className = 'mg ' + (isMine ? 'mine' : 'theirs');
-  if (animate) { grp.style.opacity = '0'; }
-
+  if (animate) grp.style.opacity = '0';
   const row = document.createElement('div');
   row.className = 'mr';
-
   if (!isMine) {
     const av = document.createElement('div');
     av.className = 'av sm';
@@ -932,12 +901,10 @@ function appendMsg(msg, animate) {
     sp.className = 'av-sp';
     row.appendChild(sp);
   }
-
   const bubble = document.createElement('div');
   bubble.className = 'mb';
   bubble.textContent = msg.text;
   row.appendChild(bubble);
-
   const meta = document.createElement('div');
   meta.className = 'mm';
   if (isMine) { const chk = document.createElement('span'); chk.className = 'chk'; chk.textContent = '✓✓'; meta.appendChild(chk); }
@@ -945,11 +912,9 @@ function appendMsg(msg, animate) {
   const tm = document.createElement('span');
   tm.textContent = formatTime(msg.ts);
   meta.appendChild(tm);
-
   grp.appendChild(row);
   grp.appendChild(meta);
   area.appendChild(grp);
-
   if (animate) {
     requestAnimationFrame(() => { grp.style.transition = 'opacity .18s'; grp.style.opacity = '1'; });
   }
@@ -1015,8 +980,6 @@ function onTyping() {
   }
   clearTimeout(typingTimer);
   typingTimer = setTimeout(stopTyping, 2000);
-
-  // Clean stale typing users
   const cutoff = Date.now() - 4000;
   for (const [u, ts] of Object.entries(typingUsers)) {
     if (ts < cutoff) delete typingUsers[u];
@@ -1183,7 +1146,6 @@ window.addEventListener('keydown', e => {
   }
 });
 
-// Clean up stale typing every 2s
 setInterval(() => {
   const cutoff = Date.now() - 4000;
   let changed = false;
