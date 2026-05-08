@@ -373,6 +373,20 @@ async function handleMessage(token, session, data) {
     broadcast({ type: 'stop_typing', user: session.name, room: (data.room || 'general').trim().slice(0, 64) }, token);
   }
 
+  if (type === 'dm') {
+    const text = (data.text || '').trim().slice(0, 2000);
+    const to   = (data.to || '').trim();
+    const msgId = data.id || crypto.randomBytes(8).toString('hex');
+    if (!text || !to) return;
+    const msg = { id: msgId, sender: session.name, to, text, ts: Date.now(), isDM: true };
+    // Send to recipient(s)
+    for (const [tok, client] of clients.entries()) {
+      if (client.session.name === to || tok === token) {
+        wsSend(client.ws, JSON.stringify({ type: 'dm', message: msg }));
+      }
+    }
+  }
+
   if (type === 'ping') {
     const c = clients.get(token);
     if (c) wsSend(c.ws, JSON.stringify({ type: 'pong' }));
