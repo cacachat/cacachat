@@ -53,6 +53,7 @@ let typingTimer = null, typingUsers = {}, lastTypingSent = 0;
 let dmTypingUsers = {};
 let onlineUsers = [];
 let renderedMsgIds = new Set();
+let seenMessages = new Set(); // FIX 6: tracks which of our sent messages have been seen
 let reconnectTimer = null, reconnectDelay = 1000;
 let dmConvos = {};
 let dmUnread = {};
@@ -465,7 +466,10 @@ function setupProfile() {
     const dateStr = me.created || localStorage.getItem('cc_created_' + me.name) || '';
     if (dateStr) {
       const d = new Date(dateStr);
-      createdEl.textContent = 'Joined ' + d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      const day   = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year  = d.getFullYear();
+      createdEl.textContent = `Joined ${day}/${month}/${year}`;
     } else {
       createdEl.textContent = '';
     }
@@ -874,6 +878,8 @@ function setMyStatus(status, el) {
   const statusEl = document.querySelector('.sb-me-status');
   if (statusEl) statusEl.style.color = cfg.color;
   if (me) localStorage.setItem('cc_status_' + me.name, status);
+  // FIX 5: tell server so it broadcasts to everyone
+  wsSend({ type: 'status_update', status });
 }
 
 // ─── THEME ───
@@ -1039,7 +1045,17 @@ function handleWS(data) {
         if (currentDashTab === 'friends') renderFriendsTab();
       }
       break;
-    case 'friend_accepted':
+    case 'dm_seen':
+      // FIX 6: the recipient saw our message — update the checkmark to ✓✓
+      if (data.by && data.messageId) {
+        seenMessages.add(data.messageId);
+        const seenEl = document.getElementById('seen-' + data.messageId);
+        if (seenEl) {
+          seenEl.textContent = ' ✓✓';
+          seenEl.style.color = 'var(--acc2)';
+        }
+      }
+      break;
       // Ignore if not addressed to us or if it's our own message echoed back
       if (!data.user) break;
       const _faName = (data.user.name || '').toLowerCase();
@@ -1142,7 +1158,11 @@ function renderFriendsTab() {
     avEl.style.position = 'relative';
     renderAvatar(avEl, { pfp: f.pfp || null, emoji: f.avatar || null, color: col, name: f.displayName || f.name });
     const dot = document.createElement('div');
-    dot.className = 'av-dot ' + (online ? 's-on' : 's-off');
+    // FIX 5: use real status from online data, not just online/offline
+    const statusCls = online
+      ? ({ online: 's-on', dnd: 's-dnd', away: 's-away', offline: 's-off' }[online.status] || 's-on')
+      : 's-off';
+    dot.className = 'av-dot ' + statusCls;
     avEl.appendChild(dot);
 
     row.appendChild(avEl);
@@ -1637,6 +1657,8 @@ function renderDMHeader(name) {
 }
 
 function openDM(user) {
+  // FIX 2: prevent DMing yourself
+  if (user.name === (me.username || me.name)) return;
   currentDM = user.name; currentRoom = null;
   // Un-hide when explicitly opened
   unhideDM(user.name);
@@ -1673,6 +1695,13 @@ function openDM(user) {
   msgs.innerHTML = '<div class="day-div"><span>Messages</span></div>';
   if (dmConvos[user.name]) {
     dmConvos[user.name].forEach(m => appendMsg(m, false));
+    // FIX 6: send seen for last message from the partner
+    const lastFromPartner = [...dmConvos[user.name]].reverse().find(
+      m => m.senderUsername === user.name || (m.sender === user.name && m.sender !== me.name)
+    );
+    if (lastFromPartner && lastFromPartner.id) {
+      wsSend({ type: 'dm_seen', senderUsername: lastFromPartner.senderUsername || lastFromPartner.sender, messageId: lastFromPartner.id });
+    }
   }
   msgs.scrollTop = msgs.scrollHeight;
 
@@ -1698,6 +1727,10 @@ function onDMMsg(msg) {
     const area = document.getElementById('msgs');
     area.scrollTop = area.scrollHeight;
     renderTyping();
+    // FIX 6: tell sender we've seen it (only if it's not our own message)
+    if (msg.senderUsername !== (me.username || me.name) && msg.id) {
+      wsSend({ type: 'dm_seen', senderUsername: msg.senderUsername, messageId: msg.id });
+    }
   } else {
     dmUnread[partner] = (dmUnread[partner] || 0) + 1;
     updateDMBadge();
@@ -1793,8 +1826,13 @@ function renderDMList() {
     renderAvatar(avDiv, { pfp, emoji: friend?.avatar || u.avatar || null, color: col, name });
 
     const isOnline = !!onlineUsers.find(x => x.name === name);
+    const onlineUser = onlineUsers.find(x => x.name === name);
     const dot = document.createElement('div');
-    dot.className = 'av-dot ' + (isOnline ? 's-on' : 's-off');
+    // FIX 7 + FIX 5: proper status class, dot is outside overflow:hidden via CSS
+    const dmStatusCls = onlineUser
+      ? ({ online: 's-on', dnd: 's-dnd', away: 's-away', offline: 's-off' }[onlineUser.status] || 's-on')
+      : 's-off';
+    dot.className = 'av-dot ' + dmStatusCls;
     avDiv.appendChild(dot);
     avDiv.onclick = e => { e.stopPropagation(); showUserProfile(u); };
 
@@ -1899,6 +1937,7 @@ function appendMsg(msg, animate) {
   const div = document.createElement('div');
   div.className = 'mg ' + (isMine ? 'mine' : 'theirs');
   if (!animate) div.style.animation = 'none';
+  if (msg.id) div.dataset.msgId = msg.id;
 
   const avDiv = document.createElement('div');
   avDiv.className = 'av sm' + (isMine ? ' my-av-el' : '');
@@ -1924,6 +1963,28 @@ function appendMsg(msg, animate) {
   const meta = document.createElement('div');
   meta.className = 'mm';
   meta.textContent = formatTime(msg.ts);
+
+  // FIX 6: show seen checkmarks for my DM messages
+  if (isMine && msg.isDM && msg.id) {
+    const seenEl = document.createElement('span');
+    seenEl.className = 'msg-seen-indicator';
+    seenEl.id = 'seen-' + msg.id;
+    // Check if blocked (can't get 2 ticks if blocked)
+    const partnerName = msg.toUsername || msg.to;
+    const isBlocked = blocked.find(b => b.name === partnerName);
+    if (isBlocked) {
+      seenEl.textContent = ' ✓';
+      seenEl.style.color = 'var(--t3)';
+    } else if (seenMessages.has(msg.id)) {
+      seenEl.textContent = ' ✓✓';
+      seenEl.style.color = 'var(--acc2)';
+    } else {
+      seenEl.textContent = ' ✓';
+      seenEl.style.color = 'var(--t3)';
+    }
+    seenEl.style.fontSize = '10px';
+    meta.appendChild(seenEl);
+  }
 
   msgWrap.appendChild(bubble);
   msgWrap.appendChild(meta);
@@ -2335,8 +2396,34 @@ function showUserProfile(u) {
   const uvBio = document.getElementById('uv-bio');
   const partnerBio = friendData.bio || localStorage.getItem('cc_bio_' + u.name) || '';
   if (uvBio) {
-    if (partnerBio) { uvBio.textContent = partnerBio; uvBio.style.display = ''; }
+    if (partnerBio) {
+      // FIX 4: strip accidental surrounding quotes and disable CSS quote pseudo-elements
+      uvBio.textContent = partnerBio.replace(/^["'"']+|["'"']+$/g, '');
+      uvBio.style.setProperty('--uv-bio-before', 'none');
+      uvBio.setAttribute('data-nobefore', '1');
+      uvBio.style.display = '';
+    }
     else uvBio.style.display = 'none';
+  }
+
+  // FIX 3: creation date with dd/mm/yyyy format
+  let uvCreated = document.getElementById('uv-created');
+  if (!uvCreated) {
+    uvCreated = document.createElement('div');
+    uvCreated.id = 'uv-created';
+    uvCreated.style.cssText = 'font-size:11px;color:var(--t2);margin-top:4px;font-family:monospace';
+    uvBio?.parentNode?.insertBefore(uvCreated, uvBio.nextSibling) || document.getElementById('uv-body')?.appendChild(uvCreated);
+  }
+  const partnerCreated = u.created || friendData.created || localStorage.getItem('cc_created_' + u.name) || '';
+  if (partnerCreated && uvCreated) {
+    const d = new Date(partnerCreated);
+    const day   = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year  = d.getFullYear();
+    uvCreated.textContent = `Joined ${day}/${month}/${year}`;
+    uvCreated.style.display = '';
+  } else if (uvCreated) {
+    uvCreated.style.display = 'none';
   }
 
   // Banner — prefer friends array, then localStorage
