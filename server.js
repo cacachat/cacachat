@@ -692,7 +692,7 @@ if (pathname === '/api/friends/cancel' && req.method === 'POST') {
         await hydrateSessionFromUser(token);
         session = await getSession(token);
         const me = session.username;
-        const vu = validUsername(body_.username || body_.with);
+        const vu = validUsername(body_.username || body_.with || body_.name);
         if (vu.error) return json(400, { error: vu.error });
         const them = vu.value;
         let sa = await loadSoc(me);
@@ -1140,6 +1140,39 @@ async function handleMessage(token, data) {
   if (!c || !c.session) return;
   const session = c.session;
   const { type } = data;
+
+  // ── FIX 1: Live friend_request relay to recipient ──
+  if (type === 'friend_request') {
+    const toU = (data.to || '').trim().toLowerCase();
+    if (!toU || toU === session.username) return;
+    const recv = [...clients.values()].find(cli => cli.session.username === toU);
+    if (recv && recv.ws.readyState === 1) {
+      wsSend(recv.ws, JSON.stringify({ ...data, type: 'friend_request' }));
+    }
+    return;
+  }
+
+  // ── FIX 3: Live friend_accepted relay so sender's pendingOut clears instantly ──
+  if (type === 'friend_accepted') {
+    const toU = (data.to || '').trim().toLowerCase();
+    if (!toU || toU === session.username) return;
+    const recv = [...clients.values()].find(cli => cli.session.username === toU);
+    if (recv && recv.ws.readyState === 1) {
+      wsSend(recv.ws, JSON.stringify({ ...data, type: 'friend_accepted' }));
+    }
+    return;
+  }
+
+  // ── FIX 8/9: Live friend_removed so other side loses friend instantly ──
+  if (type === 'friend_removed') {
+    const toU = (data.to || '').trim().toLowerCase();
+    if (!toU || toU === session.username) return;
+    const recv = [...clients.values()].find(cli => cli.session.username === toU);
+    if (recv && recv.ws.readyState === 1) {
+      wsSend(recv.ws, JSON.stringify({ type: 'friend_removed', by: session.username }));
+    }
+    return;
+  }
 
   if (type === 'dm') {
     const text = (data.text || '').trim().slice(0, 2000);
