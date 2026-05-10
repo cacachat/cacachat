@@ -9,6 +9,13 @@ const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 
+// ── Admin ─────────────────────────────────────────────────────────────────────
+const ADMIN_KEY = process.env.ADMIN_KEY;
+function checkAdminKey(key) {
+  if (!ADMIN_KEY) return false;
+  return key === ADMIN_KEY;
+}
+
 // ── Upstash Redis REST ────────────────────────────────────────────────────────
 const REDIS_URL   = process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -848,6 +855,105 @@ sb.out = sb.out.filter(x => x.to !== me);
       const token = getToken();
       if (!await getSession(token)) return json(401, { error: 'Not authenticated' });
       return json(200, { users: getOnlineUsers() });
+    }
+
+    // ── Admin: list all users ──
+    // GET /api/admin/users?key=<ADMIN_KEY>
+    if (pathname === '/api/admin/users' && req.method === 'GET') {
+      const key = url.searchParams.get('key') || '';
+      if (!checkAdminKey(key)) return json(403, { error: 'Forbidden' });
+      const allUsernames = await r.smembers('username_index');
+      const users = [];
+      const seenEmails = new Set();
+      for (const uname of (allUsernames || [])) {
+        if (typeof uname !== 'string') continue;
+        const email = await r.get('uname:' + uname);
+        if (!email) {
+          users.push({ username: uname, name: '(orphan)', email: '', created: null, duplicate: true });
+          continue;
+        }
+        const raw = await r.get('user:' + email);
+        if (!raw) {
+          users.push({ username: uname, name: '(missing user)', email, created: null, duplicate: true });
+          continue;
+        }
+        let u;
+        try { u = JSON.parse(raw); } catch { continue; }
+        const isDupe = seenEmails.has(u.email);
+        seenEmails.add(u.email);
+        users.push({
+          username: u.username || uname,
+          name: u.name || '',
+          email: u.email || email,
+          avatarUrl: u.avatarUrl || null,
+          created: u.created || null,
+          duplicate: isDupe,
+        });
+      }
+      return json(200, { users });
+    }
+
+    // ── Admin: delete user ──
+    // POST /api/admin/delete  { key, username }
+    if (pathname === '/api/admin/delete' && req.method === 'POST') {
+      return body(async ({ key, username }) => {
+        if (!checkAdminKey(key)) return json(403, { error: 'Forbidden' });
+        if (!username) return json(400, { error: 'username required' });
+        const uname = username.trim().toLowerCase();
+        const email = await r.get('uname:' + uname);
+        let note = '';
+        if (email) {
+          await r.del('user:' + email.toLowerCase());
+        } else {
+          note = 'No email mapping found; cleaned index only.';
+        }
+        await r.del('uname:' + uname);
+        await r.srem('username_index', uname);
+        await r.del('soc:' + uname);
+        for (const [tok, client] of clients.entries()) {
+          if (client.session.username === uname) {
+            try { client.ws.socket.destroy(); } catch {}
+            clients.delete(tok);
+            await r.del('sess:' + tok);
+          }
+        }
+        return json(200, { ok: true, note });
+      });
+    }
+
+    // ── Admin: fix index issues ──
+    // POST /api/admin/fix  { key }
+    if (pathname === '/api/admin/fix' && req.method === 'POST') {
+      return body(async ({ key }) => {
+        if (!checkAdminKey(key)) return json(403, { error: 'Forbidden' });
+        const allUsernames = await r.smembers('username_index');
+        const fixed = [];
+        const removed = [];
+        for (const uname of (allUsernames || [])) {
+          if (typeof uname !== 'string') continue;
+          const email = await r.get('uname:' + uname);
+          if (!email) {
+            await r.srem('username_index', uname);
+            removed.push(uname);
+            continue;
+          }
+          const raw = await r.get('user:' + email);
+          if (!raw) {
+            await r.del('uname:' + uname);
+            await r.srem('username_index', uname);
+            removed.push(uname);
+            continue;
+          }
+          let u;
+          try { u = JSON.parse(raw); } catch { removed.push(uname); continue; }
+          const socKey = 'soc:' + uname;
+          if (!(await r.exists(socKey))) {
+            await r.set(socKey, JSON.stringify(emptySoc()));
+            fixed.push(uname + ':soc_created');
+          }
+        }
+        return json(200, { ok: true, fixed, removed });
+      });
     }
 
     res.writeHead(404, { 'Content-Type': 'application/json' });
