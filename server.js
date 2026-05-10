@@ -313,6 +313,7 @@ async function publicUserCard(username) {
     name: fu.name || fu.username,
     avatarUrl: fu.avatarUrl || null,
     color: fu.color ?? 0,
+    created: fu.created || null,  // FIX 3: expose join date
   };
 }
 
@@ -391,6 +392,7 @@ function getOnlineUsers() {
         email: client.session.email,
         isGuest: client.session.isGuest,
         avatarUrl: client.session.avatarUrl || null,
+        status: client.session.status || 'online',  // FIX 5: include status
       });
     }
   }
@@ -726,13 +728,14 @@ if (pathname === '/api/friends/cancel' && req.method === 'POST') {
         await ensureUserSoc(them);
         let sa = await loadSoc(me);
         let sb = await loadSoc(them);
+        // FIX 1: remove from BOTH sides' friends lists so target also loses blocker
         sa.friends = sa.friends.filter(x => x !== them);
         sb.friends = sb.friends.filter(x => x !== me);
-        // remove the incoming request from receiver
-sa.in = sa.in.filter(x => x.from !== them);
-
-// remove sender outgoing request
-sb.out = sb.out.filter(x => x.to !== me);
+        // Clean up all pending requests between the two users
+        sa.in  = sa.in.filter(x => x.from !== them);
+        sa.out = sa.out.filter(x => x.to   !== them);
+        sb.in  = sb.in.filter(x => x.from !== me);
+        sb.out = sb.out.filter(x => x.to   !== me);
         if (!sa.blocked.includes(them)) sa.blocked.push(them);
         await saveSoc(me, sa);
         await saveSoc(them, sb);
@@ -1237,9 +1240,33 @@ async function handleMessage(token, data) {
     return;
   }
 
+  // FIX 6: seen receipts — relay to sender that recipient saw the message
+  if (type === 'dm_seen') {
+    const senderU = String(data.senderUsername || data.sender || '').trim().toLowerCase();
+    if (!senderU || senderU === session.username) return;
+    const senderClient = [...clients.values()].find(cli => cli.session.username === senderU);
+    if (senderClient && senderClient.ws.readyState === 1) {
+      wsSend(senderClient.ws, JSON.stringify({
+        type: 'dm_seen',
+        by: session.username,
+        messageId: data.messageId,
+        threadWith: session.username,
+      }));
+    }
+    return;
+  }
+
   if (type === 'ping') {
     const c = clients.get(token);
     if (c) wsSend(c.ws, JSON.stringify({ type: 'pong' }));
+  }
+
+  // FIX 5: client sends their status so server can broadcast it to others
+  if (type === 'status_update') {
+    const allowed = ['online', 'dnd', 'away', 'offline'];
+    const newStatus = allowed.includes(data.status) ? data.status : 'online';
+    await mergeSession(token, { status: newStatus });
+    broadcastAll({ type: 'online_update', users: getOnlineUsers() });
   }
 }
 
