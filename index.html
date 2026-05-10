@@ -11,6 +11,29 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<style>
+/* FIX 4: remove any CSS-injected quotes around the bio */
+.uv-bio::before, .uv-bio::after { content: none !important; }
+
+/* FIX 7: status dot is absolutely positioned outside the avatar overflow:hidden clip */
+.av { position: relative !important; overflow: visible !important; }
+.av img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+.av-dot {
+  position: absolute !important;
+  bottom: -1px !important;
+  right: -1px !important;
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 50% !important;
+  border: 2px solid var(--bg1) !important;
+  pointer-events: none;
+  z-index: 2;
+}
+.av-dot.s-on  { background: var(--green) !important; box-shadow: 0 0 6px var(--green); }
+.av-dot.s-dnd { background: var(--red) !important; box-shadow: 0 0 6px var(--red); }
+.av-dot.s-away { background: var(--yellow) !important; box-shadow: 0 0 6px var(--yellow); }
+.av-dot.s-off { background: var(--t2) !important; box-shadow: none; }
+</style>
 </head>
 <body>
 
