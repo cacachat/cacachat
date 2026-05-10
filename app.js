@@ -108,8 +108,10 @@ async function doLogin() {
   if (res.error) return showAuthError(res.error);
   token = res.token; me = res.user;
   if (me && me.name) me.name = me.name.toLowerCase();
+  // FIX 5: store join date
+  if (me && !me.created) me.created = new Date().toISOString();
+  try { localStorage.setItem('cc_created_' + me.name, me.created || ''); } catch {}
   localStorage.setItem('cacachat_token', token);
-  document.getElementById('auth-screen').style.display = 'none';
   enterApp();
 }
 
@@ -134,7 +136,6 @@ async function doRegister() {
   if (me && me.name) me.name = me.name.toLowerCase();
   if (!me.displayName) me.displayName = displayName;
   localStorage.setItem('cacachat_token', token);
-  document.getElementById('auth-screen').style.display = 'none';
   enterApp();
 }
 
@@ -165,19 +166,17 @@ async function doLogout() {
 }
 
 async function tryAutoLogin() {
-  if (!token) {
-    document.getElementById('auth-screen').style.display = 'flex';
-    return;
-  }
+  if (!token) return;
   const res = await apiFetch('/api/me');
-  if (res.error) {
-    localStorage.removeItem('cacachat_token');
-    token = '';
-    document.getElementById('auth-screen').style.display = 'flex';
-    return;
-  }
+  if (res.error) { localStorage.removeItem('cacachat_token'); token = ''; return; }
   me = res.user;
   if (me && me.name) me.name = me.name.toLowerCase();
+  // FIX 5: restore or store join date
+  if (me) {
+    const saved = localStorage.getItem('cc_created_' + me.name);
+    if (!me.created && saved) me.created = saved;
+    if (me.created) try { localStorage.setItem('cc_created_' + me.name, me.created); } catch {}
+  }
   enterApp();
 }
 
@@ -322,98 +321,95 @@ async function enterApp() {
 async function syncFriendsFromServer() {
   if (!me || !token) return;
 
+  // 1. Fetch confirmed friends
   try {
-    const res = await apiFetch('/api/social');
-    if (res.error) return;
-
-    // Sync confirmed friends
-    if (Array.isArray(res.friends)) {
+    const res = await apiFetch('/api/friends');
+    if (res.friends && Array.isArray(res.friends)) {
       res.friends.forEach(f => {
-        // Server publicUserCard returns: { username, name (display name), avatarUrl, color }
-        const uname = (f.username || '').toLowerCase();
-        if (!uname) return; // skip users without a username
-        const displayName = f.name || uname; // f.name is the human display name
-        const existing = friends.find(x => x.name === uname);
-        const pfpUrl = f.avatarUrl || f.pfp || null;
-        if (!existing) {
+        f.name = (f.name || '').toLowerCase();
+        if (!friends.find(x => x.name === f.name)) {
           friends.push({
-            name: uname,
-            displayName,
+            name: f.name,
+            displayName: f.displayName || f.display_name || f.name,
             color: f.color || 0,
-            avatar: null,
-            pfp: pfpUrl,
-            banner: null,
-            bio: ''
+            avatar: f.avatar || null,
+            pfp: f.pfp || null,
+            banner: f.banner || null,
+            bio: f.bio || ''
           });
         } else {
-          // Always update display name and pfp from server truth
-          if (displayName !== uname) existing.displayName = displayName;
-          if (pfpUrl) existing.pfp = pfpUrl;
+          // Update cached profile data from server
+          const local = friends.find(x => x.name === f.name);
+          if (f.displayName || f.display_name) local.displayName = f.displayName || f.display_name;
+          if (f.pfp) local.pfp = f.pfp;
+          if (f.banner) local.banner = f.banner;
+          if (f.bio) local.bio = f.bio;
         }
-        // Cache pfp
-        if (pfpUrl) { try { localStorage.setItem('cc_pfp_' + uname, pfpUrl); } catch {} }
+        // Cache profile assets locally
+        try {
+          if (f.pfp) localStorage.setItem('cc_pfp_' + f.name, f.pfp);
+          if (f.banner) localStorage.setItem('cc_banner_' + f.name, f.banner);
+          if (f.bio) localStorage.setItem('cc_bio_' + f.name, f.bio);
+        } catch {}
       });
+      saveSocialData();
     }
+  } catch {}
 
-    // Sync incoming requests
-    if (Array.isArray(res.pendingIn)) {
-      res.pendingIn.forEach(req => {
-        // req has: { username, name (display name), avatarUrl, color, ts }
-        const from = (req.username || '').toLowerCase();
-        if (!from || from === me.name) return;
-        if (pendingIn.find(p => p.from === from)) return;
-        if (friends.find(f => f.name === from)) return;
-        if (blocked.find(b => b.name === from)) return;
-        const pfpUrl = req.avatarUrl || req.pfp || null;
+  // 2. Fetch pending incoming requests
+  try {
+    const res = await apiFetch('/api/social');
+    const incoming = res.incoming || res.pendingIn || res.pending || [];
+    if (Array.isArray(incoming)) {
+      incoming.forEach(req => {
+        req.from = (req.from || req.name || '').toLowerCase();
+        if (!req.from) return;
+        if (pendingIn.find(p => p.from === req.from)) return;
+        if (friends.find(f => f.name === req.from)) return;
+        if (blocked.find(b => b.name === req.from)) return;
         pendingIn.push({
-          from,
-          displayName: req.name || from,
-          avatar: null,
+          from: req.from,
+          displayName: req.displayName || req.display_name || req.from,
+          avatar: req.avatar || null,
           color: req.color || 0,
-          pfp: pfpUrl,
-          banner: null,
-          bio: ''
+          pfp: req.pfp || null,
+          banner: req.banner || null,
+          bio: req.bio || ''
         });
-        if (pfpUrl) { try { localStorage.setItem('cc_pfp_' + from, pfpUrl); } catch {} }
       });
+      saveSocialData();
     }
+  } catch {}
 
-    // Sync outgoing requests
-    if (Array.isArray(res.pendingOut)) {
-      res.pendingOut.forEach(req => {
-        const to = (req.username || req.to || req.name || '').toLowerCase();
+  // 3. Fetch pending outgoing requests
+  try {
+    const res = await apiFetch('/api/social');
+    const outgoing = res.outgoing || res.pendingOut || [];
+    if (Array.isArray(outgoing)) {
+      outgoing.forEach(req => {
+        const to = (req.to || req.name || '').toLowerCase();
         if (!to) return;
         if (!pendingOut.find(p => p.to === to)) {
-          pendingOut.push({ to, sentAt: req.ts || 0 });
+          pendingOut.push({ to, sentAt: req.sentAt || 0 });
         }
       });
+      saveSocialData();
     }
-
-    saveSocialData();
-    updatePendingBadge();
-    renderDMList();
-    if (currentDashTab === 'friends') renderFriendsTab();
-    else if (currentDashTab === 'pending') renderPendingTab();
   } catch {}
+
+  updatePendingBadge();
+  renderDMList();
+  if (currentDashTab === 'friends') renderFriendsTab();
+  else if (currentDashTab === 'pending') renderPendingTab();
 }
 
 function loadAvatarPrefs() {
   const acct = me ? me.name : '';
   selectedAvatar = localStorage.getItem('cc_avatar_' + acct) || localStorage.getItem('cc_avatar') || AVATARS[0];
   selectedColor  = localStorage.getItem('cc_avcolor_' + acct) || localStorage.getItem('cc_avcolor') || AVATAR_COLORS[0];
-  // Prefer server-persisted pfp (me.avatarUrl), fallback to localStorage cache
-  selectedPfpDataUrl = me?.avatarUrl || localStorage.getItem('cc_pfp_' + acct) || null;
-  // Sync localStorage with server truth so future loads are fast
-  if (me?.avatarUrl && me.avatarUrl !== localStorage.getItem('cc_pfp_' + acct)) {
-    try { localStorage.setItem('cc_pfp_' + acct, me.avatarUrl); } catch {}
-  }
+  selectedPfpDataUrl = localStorage.getItem('cc_pfp_' + acct) || null;
   selectedBannerData = localStorage.getItem('cc_banner_' + acct) || null;
   myBio = localStorage.getItem('cc_bio_' + acct) || '';
-  // Restore nickname
-  const savedNick = localStorage.getItem('cc_nickname_' + acct);
-  if (savedNick) me.displayName = savedNick;
-  // Store base name for nickname resets
-  if (me && !me._baseName) me._baseName = me.displayName || me.name;
 }
 
 function loadSettings() {
@@ -463,6 +459,17 @@ function setupProfile() {
   document.getElementById('my-name').textContent = displayName;
   document.getElementById('pr-name').textContent = displayName;
   document.getElementById('pr-handle').textContent = '@' + me.name;
+  // FIX 5: show account creation date
+  const createdEl = document.getElementById('pr-created');
+  if (createdEl) {
+    const dateStr = me.created || localStorage.getItem('cc_created_' + me.name) || '';
+    if (dateStr) {
+      const d = new Date(dateStr);
+      createdEl.textContent = 'Joined ' + d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    } else {
+      createdEl.textContent = '';
+    }
+  }
   // Apply banner to profile panel banner
   applyBannerToElement(document.getElementById('pr-banner'));
   // Restore saved status — per-account key; default to 'online'
@@ -780,61 +787,19 @@ function applyBannerToElement(el) {
   }
 }
 
-function isUserOnline(username) {
-  if (!username) return false;
-  const lower = username.toLowerCase();
-  return onlineUsers.some(u =>
-    (u.username && u.username.toLowerCase() === lower) ||
-    (u.name && u.name.toLowerCase() === lower)
-  );
-}
-
-function getOnlineUser(username) {
-  if (!username) return null;
-  const lower = username.toLowerCase();
-  return onlineUsers.find(u =>
-    (u.username && u.username.toLowerCase() === lower) ||
-    (u.name && u.name.toLowerCase() === lower)
-  ) || null;
-}
-
-function getPartnerPfp(username) {
-  // Check online users first (live data)
-  const online = getOnlineUser(username);
-  if (online?.avatarUrl) {
-    try { localStorage.setItem('cc_pfp_' + username, online.avatarUrl); } catch {}
-    return online.avatarUrl;
-  }
-  // Check friends array
-  const friend = friends.find(f => f.name === username);
-  if (friend?.pfp) return friend.pfp;
-  // Fallback to localStorage cache
-  return localStorage.getItem('cc_pfp_' + username) || null;
+// ─── AVATAR / PROFILE PANEL ───
+function buildAvatarPicker() {
+  // kept for compatibility but emoji/color pickers removed
 }
 
 function saveProfile() {
   const acct = me ? me.name : '';
-  // Save nickname
-  const nicknameInput = document.getElementById('nickname-input');
-  if (nicknameInput) {
-    const nick = nicknameInput.value.trim();
-    if (nick) {
-      me.displayName = nick;
-      localStorage.setItem('cc_nickname_' + acct, nick);
-    } else {
-      me.displayName = me._baseName || me.name;
-      localStorage.removeItem('cc_nickname_' + acct);
-    }
-  }
   localStorage.setItem('cc_avatar_' + acct, selectedAvatar);
   localStorage.setItem('cc_avcolor_' + acct, selectedColor);
   if (selectedPfpDataUrl) {
     try { localStorage.setItem('cc_pfp_' + acct, selectedPfpDataUrl); } catch {}
-    // Persist pfp to server so it survives logout/login
-    apiPost('/api/profile', { avatarUrl: selectedPfpDataUrl }).catch(() => {});
   } else {
     localStorage.removeItem('cc_pfp_' + acct);
-    apiPost('/api/profile', { avatarUrl: null }).catch(() => {});
   }
   // Save banner per account
   if (selectedBannerData) {
@@ -873,12 +838,6 @@ function switchSettingsTab(tab) {
 }
 
 function populateProfileTab() {
-  // Load nickname
-  const nicknameInput = document.getElementById('nickname-input');
-  if (nicknameInput) {
-    const savedNick = localStorage.getItem('cc_nickname_' + (me ? me.name : ''));
-    nicknameInput.value = savedNick || '';
-  }
   // Load bio
   const bioInput = document.getElementById('bio-input');
   if (bioInput) {
@@ -1007,12 +966,6 @@ function handleWS(data) {
       break;
     case 'online_update':
       onlineUsers = data.users || [];
-      // Cache profile pictures from live online users
-      onlineUsers.forEach(u => {
-        if (u.avatarUrl && u.username) {
-          try { localStorage.setItem('cc_pfp_' + (u.username || u.name), u.avatarUrl); } catch {}
-        }
-      });
       renderDMList();
       break;
     case 'user_join':
@@ -1073,6 +1026,19 @@ function handleWS(data) {
         showToast(data.color ? AVATAR_COLORS[reqColor % AVATAR_COLORS.length] : AVATAR_COLORS[0], data.displayName || data.from, 'sent you a friend request!');
       }
       break;
+    case 'friend_removed':
+      // FIX 8: other user removed us — drop them from our friends list
+      if (!data.by) break;
+      {
+        const removedBy = (data.by || '').toLowerCase();
+        if (removedBy === me.name) break;
+        friends = friends.filter(f => f.name !== removedBy);
+        saveSocialData();
+        renderFriendsTab();
+        renderDMList();
+        if (currentDashTab === 'friends') renderFriendsTab();
+      }
+      break;
     case 'friend_accepted':
       // Ignore if not addressed to us or if it's our own message echoed back
       if (!data.user) break;
@@ -1081,8 +1047,9 @@ function handleWS(data) {
       if (data.to && (data.to || '').toLowerCase() !== me.name) break;
       {
         const acceptor = { ...data.user, name: _faName };
-        // Move from pendingOut → friends
+        // FIX 3: clear from BOTH pendingOut (sender) and pendingIn (acceptor side echo)
         pendingOut = pendingOut.filter(p => p.to !== acceptor.name);
+        pendingIn  = pendingIn.filter(p => p.from !== acceptor.name);
         if (!friends.find(f => f.name === acceptor.name)) {
           friends.push({
             name: acceptor.name,
@@ -1165,7 +1132,7 @@ function renderFriendsTab() {
   }
   grid.innerHTML = '';
   friends.forEach(f => {
-    const online = getOnlineUser(f.name);
+    const online = onlineUsers.find(u => u.name === f.name);
     const col = f.color || AVATAR_COLORS[0];
     const row = document.createElement('div');
     row.className = 'friend-row';
@@ -1291,12 +1258,15 @@ function renderBlockedTab() {
     row.className = 'friend-row';
     const avEl = document.createElement('div');
     avEl.className = 'av';
-    renderAvatar(avEl, { emoji: '🚫', color: '#555', name: u.name });
+    // FIX 6: show their pfp if we have it
+    const bPfp = u.pfp || localStorage.getItem('cc_pfp_' + u.name) || null;
+    const bCol = u.color ? (typeof u.color === 'string' ? u.color : AVATAR_COLORS[u.color % AVATAR_COLORS.length]) : '#555';
+    renderAvatar(avEl, { pfp: bPfp, emoji: u.avatar || null, color: bCol, name: u.displayName || u.name });
     row.appendChild(avEl);
     row.innerHTML += `
       <div class="friend-row-info">
-        <div class="friend-row-name">${esc(u.name)}</div>
-        <div class="friend-row-status">Blocked</div>
+        <div class="friend-row-name">${esc(u.displayName || u.name)}</div>
+        <div class="friend-row-status" style="color:var(--red)">Blocked</div>
       </div>
       <div class="friend-row-actions">
         <button class="frow-btn unblock" onclick="unblockUser('${esc(u.name)}')">Unblock</button>
@@ -1435,7 +1405,7 @@ function acceptFriend(fromName) {
   pendingIn = pendingIn.filter(p => p.from !== fromName);
 
   if (!friends.find(f => f.name === fromName)) {
-    const online = getOnlineUser(fromName);
+    const online = onlineUsers.find(u => u.name === fromName);
     friends.push({
       name: fromName,
       displayName: req.displayName || fromName,
@@ -1535,15 +1505,18 @@ async function cancelFriendRequest(toName) {
 function removeFriend(name) {
   name = (name || '').toLowerCase();
   friends = friends.filter(f => f.name !== name);
-  // Hide from DM sidebar — history is preserved if they become friends again
-  hiddenDMs.add(name);
-  saveHiddenDMs();
+  // FIX 7: don't hide DM — just keep it open but user can't text; show x to close
+  // FIX 8/9: notify the other side live so they also lose us as a friend
+  wsSend({ type: 'friend_removed', to: name });
   saveSocialData();
-  apiPost('/api/friends/remove', { name }).catch(() => {});
+  // FIX 9: correct API field — server expects 'username'
+  apiPost('/api/friends/remove', { username: name }).then(() => {
+    // Re-sync from server to make sure the removal stuck
+    syncFriendsFromServer();
+  }).catch(() => {});
   if (currentDM === name) {
-    currentDM = null;
-    document.getElementById('dashboard').style.display = 'flex';
-    document.getElementById('chat-panel').style.display = 'none';
+    // FIX 7: stay in DM but update header to show "not friends"
+    renderDMHeader(name);
   }
   renderFriendsTab();
   renderDMList();
@@ -1551,11 +1524,31 @@ function removeFriend(name) {
 
 function blockUser(name) {
   name = (name || '').toLowerCase();
+  // FIX 6: capture their profile data before removing from friends
+  const blockedFriend = friends.find(f => f.name === name);
+  const blockedUser = onlineUsers.find(u => u.name === name);
   friends = friends.filter(f => f.name !== name);
-  if (!blocked.find(b => b.name === name)) blocked.push({ name });
+  if (!blocked.find(b => b.name === name)) {
+    blocked.push({
+      name,
+      displayName: blockedFriend?.displayName || blockedUser?.name || name,
+      pfp: blockedFriend?.pfp || localStorage.getItem('cc_pfp_' + name) || null,
+      color: blockedFriend?.color || blockedUser?.color || 0,
+      avatar: blockedFriend?.avatar || blockedUser?.avatar || null,
+    });
+  }
+  // Close their DM if open
+  if (currentDM === name) {
+    currentDM = null;
+    document.getElementById('dashboard').style.display = 'flex';
+    document.getElementById('chat-panel').style.display = 'none';
+  }
+  hiddenDMs.add(name);
+  saveHiddenDMs();
   saveSocialData();
-  apiPost('/api/friends/block', { name }).catch(() => {});
+  apiPost('/api/friends/block', { username: name }).catch(() => {});
   renderFriendsTab();
+  renderDMList();
   closePanel('user-profile-panel');
   showToast('#f04455', name, 'User blocked.');
 }
@@ -1570,12 +1563,14 @@ function unblockUser(name) {
 
 function startDMWithFriend(name) {
   const f = friends.find(fr => fr.name === name);
-  const onlineUser = getOnlineUser(name);
+  const onlineUser = onlineUsers.find(u => u.name === name);
   const userObj = {
     name,
     color: f?.color || onlineUser?.color || 0,
     avatar: f?.avatar || onlineUser?.avatar || null
   };
+  // FIX 2: go to dashboard first so the DM sidebar is visible, then open the DM
+  goHome();
   showDMs();
   openDM(userObj);
 }
@@ -1625,6 +1620,22 @@ function switchRoom(room) {
 }
 
 // ─── DMs ───
+
+// FIX 7: update DM chat header after removing friend (shows read-only state)
+function renderDMHeader(name) {
+  const friend = friends.find(f => f.name === name);
+  const chAv = document.getElementById('ch-av');
+  const userPfp = friend?.pfp || localStorage.getItem('cc_pfp_' + name) || null;
+  const displayName = friend?.displayName || name;
+  const col = friend?.color
+    ? (typeof friend.color === 'string' ? friend.color : AVATAR_COLORS[friend.color % AVATAR_COLORS.length])
+    : AVATAR_COLORS[0];
+  renderAvatar(chAv, { pfp: userPfp, emoji: friend?.avatar || null, color: col, name: displayName });
+  document.getElementById('ch-name').textContent = displayName;
+  document.getElementById('ch-status').textContent = 'Not friends · read only';
+  document.getElementById('ch-online-dot').style.display = 'none';
+}
+
 function openDM(user) {
   currentDM = user.name; currentRoom = null;
   // Un-hide when explicitly opened
@@ -1641,7 +1652,7 @@ function openDM(user) {
 
   const chAv = document.getElementById('ch-av');
   const friend = friends.find(f => f.name === user.name);
-  const userPfp = friend?.pfp || getPartnerPfp(user.name);
+  const userPfp = friend?.pfp || localStorage.getItem('cc_pfp_' + user.name) || null;
   const displayName = friend?.displayName || user.name;
   const col = friend?.color
     ? (typeof friend.color === 'string' ? friend.color : AVATAR_COLORS[friend.color % AVATAR_COLORS.length])
@@ -1655,22 +1666,8 @@ function openDM(user) {
   });
   document.getElementById('ch-av-status').style.display = '';
   document.getElementById('ch-name').textContent = displayName;
-
-  // Blocked users always appear offline; messaging disabled
-  const isBlocked = !!blocked.find(b => b.name === user.name);
-  if (isBlocked) {
-    document.getElementById('ch-status').textContent = 'Blocked';
-    document.getElementById('ch-online-dot').style.display = 'none';
-    const msgInput = document.getElementById('msg-input');
-    if (msgInput) { msgInput.disabled = true; msgInput.placeholder = 'You have blocked this user.'; }
-    document.querySelector('.send-btn')?.setAttribute('disabled', 'true');
-  } else {
-    document.getElementById('ch-status').textContent = 'Direct Message';
-    document.getElementById('ch-online-dot').style.display = isUserOnline(user.name) ? '' : 'none';
-    const msgInput = document.getElementById('msg-input');
-    if (msgInput) { msgInput.disabled = false; msgInput.placeholder = 'Send a message…'; }
-    document.querySelector('.send-btn')?.removeAttribute('disabled');
-  }
+  document.getElementById('ch-status').textContent = 'Direct Message';
+  document.getElementById('ch-online-dot').style.display = onlineUsers.find(u => u.name === user.name) ? '' : 'none';
 
   const msgs = document.getElementById('msgs');
   msgs.innerHTML = '<div class="day-div"><span>Messages</span></div>';
@@ -1686,9 +1683,11 @@ function openDM(user) {
 }
 
 function onDMMsg(msg) {
-  const partner = msg.sender === me.name ? (msg.toUsername || msg.to) : msg.sender;
-  // Ignore messages from/to blocked users
-  if (blocked.find(b => b.name === partner)) return;
+  // FIX 4: use username fields (senderUsername/toUsername) not display names to key convos
+  const myUsername = me.username || me.name;
+  const senderU = msg.senderUsername || msg.sender;
+  const toU     = msg.toUsername    || msg.to;
+  const partner = senderU === myUsername ? toU : senderU;
   if (!dmConvos[partner]) dmConvos[partner] = [];
   if (dmConvos[partner].find(m => m.id === msg.id)) return;
   dmConvos[partner].push(msg);
@@ -1707,18 +1706,22 @@ function onDMMsg(msg) {
     if (msg.sender !== me.name) {
       const u = onlineUsers.find(x => x.name === msg.sender) || { color: 0 };
       const preview = userSettings.notifPreview ? msg.text : 'New message';
-      showToast(AVATAR_COLORS[u.color % AVATAR_COLORS.length], msg.sender, preview);
+      // FIX 10: pass pfp so toast shows avatar photo
+      const senderU = msg.senderUsername || msg.sender;
+      const senderF = friends.find(f => f.name === senderU);
+      const senderPfp = senderF?.pfp || localStorage.getItem('cc_pfp_' + senderU) || null;
+      showToast(AVATAR_COLORS[u.color % AVATAR_COLORS.length], msg.sender, preview, senderPfp);
     }
   }
   renderDMList();
 }
 
 function sendDM(toName, text) {
-  // Prevent messaging blocked users
-  if (blocked.find(b => b.name === toName)) return;
   const id = Math.random().toString(36).slice(2);
-  const msg = { id, sender: me.name, to: toName, text, ts: Date.now(), isDM: true };
-  wsSend({ type: 'dm', to: toName, text, id });
+  const myUsername = me.username || me.name;
+  // FIX 4: store under username key; senderUsername so server echoes match
+  const msg = { id, sender: me.name, senderUsername: myUsername, to: toName, toUsername: toName, text, ts: Date.now(), isDM: true };
+  wsSend({ type: 'dm', to: toName, toUsername: toName, text, id });
   if (!dmConvos[toName]) dmConvos[toName] = [];
   dmConvos[toName].push(msg);
   appendMsg(msg, true);
@@ -1781,7 +1784,7 @@ function renderDMList() {
       ? (typeof friend.color === 'string' ? friend.color : AVATAR_COLORS[friend.color % AVATAR_COLORS.length])
       : AVATAR_COLORS[(u.color || 0) % AVATAR_COLORS.length];
 
-    const pfp = friend?.pfp || getPartnerPfp(name);
+    const pfp = friend?.pfp || localStorage.getItem('cc_pfp_' + name) || null;
 
     const avDiv = document.createElement('div');
     avDiv.className = 'av';
@@ -1789,7 +1792,7 @@ function renderDMList() {
     avDiv.style.flexShrink = '0';
     renderAvatar(avDiv, { pfp, emoji: friend?.avatar || u.avatar || null, color: col, name });
 
-    const isOnline = isUserOnline(name);
+    const isOnline = !!onlineUsers.find(x => x.name === name);
     const dot = document.createElement('div');
     dot.className = 'av-dot ' + (isOnline ? 's-on' : 's-off');
     avDiv.appendChild(dot);
@@ -1902,7 +1905,7 @@ function appendMsg(msg, animate) {
   if (isMine) {
     renderAvatar(avDiv, { pfp: selectedPfpDataUrl, emoji: selectedAvatar, color: selectedColor, name: me.displayName || me.name });
   } else {
-    const partnerPfp = getPartnerPfp(msg.sender);
+    const partnerPfp = localStorage.getItem('cc_pfp_' + msg.sender) || null;
     renderAvatar(avDiv, { pfp: partnerPfp, emoji: u?.avatar || null, color: col, name: msg.sender });
   }
 
@@ -2051,7 +2054,7 @@ function selectServer(id) {
   const memList = document.getElementById('sv-members-list');
   memList.innerHTML = '';
   (srv.members || [me.name]).forEach(mem => {
-    const u = getOnlineUser(mem) || { name: mem, color: 0 };
+    const u = onlineUsers.find(u => u.name === mem) || { name: mem, color: 0 };
     const acctPfp = localStorage.getItem('cc_pfp_' + mem) || null;
     const col = AVATAR_COLORS[(u.color || 0) % AVATAR_COLORS.length];
     const el = document.createElement('div');
@@ -2065,7 +2068,7 @@ function selectServer(id) {
     avEl.className = 'av sm';
     renderAvatar(avEl, { pfp: acctPfp, emoji: u.avatar || null, color: col, name: mem });
 
-    const isOnline = isUserOnline(mem);
+    const isOnline = !!onlineUsers.find(x => x.name === mem);
     const dot = document.createElement('div');
     dot.className = 'oi-dot';
     dot.style.background = isOnline ? 'var(--green)' : 'var(--t2)';
@@ -2306,31 +2309,14 @@ function onClickChatHeader() {
 }
 
 function showUserProfile(u) {
-  const isOnline = isUserOnline(u.name);
+  const isOnline = !!onlineUsers.find(x => x.name === u.name);
   const friendData = friends.find(f => f.name === u.name) || {};
   const col = AVATAR_COLORS[(u.color || friendData.color || 0) % AVATAR_COLORS.length];
   const avEl = document.getElementById('uv-av');
-  const partnerPfp = friendData.pfp || getPartnerPfp(u.name);
-  const displayName = u.displayName || friendData.displayName || u.name;
-  renderAvatar(avEl, { pfp: partnerPfp, emoji: u.avatar || friendData.avatar || null, color: col, name: displayName });
-  document.getElementById('uv-name').textContent = displayName;
+  const partnerPfp = friendData.pfp || localStorage.getItem('cc_pfp_' + u.name) || null;
+  renderAvatar(avEl, { pfp: partnerPfp, emoji: u.avatar || friendData.avatar || null, color: col, name: u.displayName || friendData.displayName || u.name });
+  document.getElementById('uv-name').textContent = u.displayName || friendData.displayName || u.name;
   document.getElementById('uv-handle').textContent = '@' + u.name;
-
-  // Show nickname if different from username
-  const uvNickname = document.getElementById('uv-nickname');
-  if (uvNickname) {
-    const nick = localStorage.getItem('cc_nickname_' + u.name) || '';
-    if (nick && nick !== u.name) {
-      uvNickname.textContent = '✦ ' + nick;
-      uvNickname.style.display = '';
-    } else {
-      uvNickname.style.display = 'none';
-    }
-  }
-
-  // Member since (if available)
-  const uvJoined = document.getElementById('uv-joined');
-  if (uvJoined) uvJoined.style.display = 'none';
 
   // Status badge + online ring
   const statusBadge = document.getElementById('uv-status-badge');
@@ -2411,7 +2397,7 @@ function showUserProfile(u) {
     if (!isBlocked) {
       const blockBtn = document.createElement('button');
       blockBtn.className = 'uv-btn danger';
-      blockBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-right:5px"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>Block';
+      blockBtn.innerHTML = '🚫 Block';
       blockBtn.onclick = () => blockUser(u.name);
       actions.appendChild(blockBtn);
     } else {
@@ -2488,14 +2474,16 @@ document.addEventListener('click', e => {
 });
 
 // ─── TOAST ───
-function showToast(color, name, text) {
+function showToast(color, name, text, pfp) {
   const c = document.getElementById('toasts');
   const t = document.createElement('div');
   t.className = 'toast';
 
   const avEl = document.createElement('div');
   avEl.className = 'av sm';
-  renderAvatar(avEl, { color, name });
+  // FIX 10: show pfp in toast if available
+  const toastPfp = pfp || localStorage.getItem('cc_pfp_' + (name || '').toLowerCase()) || null;
+  renderAvatar(avEl, { pfp: toastPfp, color, name });
 
   const info = document.createElement('div');
   info.className = 'toast-info';
