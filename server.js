@@ -956,6 +956,70 @@ sb.out = sb.out.filter(x => x.to !== me);
       });
     }
 
+    // ── Admin: edit user (username + display name) ──
+    // POST /api/admin/edit  { key, username, newUsername?, newName? }
+    if (pathname === '/api/admin/edit' && req.method === 'POST') {
+      return body(async ({ key, username, newUsername, newName }) => {
+        if (!checkAdminKey(key)) return json(403, { error: 'Forbidden' });
+        if (!username) return json(400, { error: 'username required' });
+        const oldU = username.trim().toLowerCase();
+
+        // load user
+        const email = await r.get('uname:' + oldU);
+        if (!email) return json(404, { error: 'User not found' });
+        const raw = await r.get('user:' + email);
+        if (!raw) return json(404, { error: 'User record missing' });
+        let u;
+        try { u = JSON.parse(raw); } catch { return json(500, { error: 'Corrupt user record' }); }
+
+        // ── change username ──
+        if (newUsername && newUsername.trim().toLowerCase() !== oldU) {
+          const vu = validUsername(newUsername);
+          if (vu.error) return json(400, { error: vu.error });
+          const newU = vu.value;
+          if (await r.exists('uname:' + newU)) return json(409, { error: 'That username is already taken' });
+
+          // update index
+          await r.del('uname:' + oldU);
+          await r.srem('username_index', oldU);
+          await r.set('uname:' + newU, email);
+          await r.sadd('username_index', newU);
+
+          // migrate soc key
+          const oldSoc = await r.get('soc:' + oldU);
+          if (oldSoc) {
+            await r.set('soc:' + newU, oldSoc);
+            await r.del('soc:' + oldU);
+          } else {
+            await r.set('soc:' + newU, JSON.stringify(emptySoc()));
+          }
+
+          u.username = newU;
+
+          // kick live session so they get re-hydrated with new username
+          for (const [tok, client] of clients.entries()) {
+            if (client.session.username === oldU) {
+              try { client.ws.socket.destroy(); } catch {}
+              clients.delete(tok);
+              await r.del('sess:' + tok);
+            }
+          }
+        }
+
+        // ── change display name ──
+        if (newName && newName.trim() !== u.name) {
+          const trimmed = newName.trim().slice(0, 32);
+          if (trimmed.length < 2) return json(400, { error: 'Display name must be at least 2 characters' });
+          u.name = trimmed;
+        }
+
+        // save updated user record
+        await r.set('user:' + email, JSON.stringify(u));
+
+        return json(200, { ok: true, user: { username: u.username, name: u.name, email: u.email } });
+      });
+    }
+
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
 
