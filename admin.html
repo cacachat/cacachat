@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CacaChat Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0d0f;
+    --bg2: #141416;
+    --bg3: #1c1c1f;
+    --bg4: #252528;
+    --border: #2a2a2e;
+    --t1: #f0f0f2;
+    --t2: #888892;
+    --t3: #555560;
+    --acc: #c8854a;
+    --acc2: #e0a060;
+    --red: #e05050;
+    --red2: #ff6b6b;
+    --green: #50c878;
+    --yellow: #f0c040;
+    --blue: #4a90d4;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--t1);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .header-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--acc);
+    letter-spacing: 0.5px;
+  }
+
+  .header-sub {
+    font-size: 11px;
+    color: var(--t3);
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 1px;
+  }
+
+  .header-spacer { flex: 1; }
+
+  .status-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--t2);
+  }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--t3);
+  }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  /* ── AUTH SCREEN ── */
+  #auth-screen {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+
+  .auth-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .auth-card h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--acc);
+    margin-bottom: 6px;
+  }
+
+  .auth-card p {
+    font-size: 13px;
+    color: var(--t2);
+    margin-bottom: 28px;
+    line-height: 1.6;
+  }
+
+  .field-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--t3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  .field-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  input[type="text"], input[type="password"], input[type="url"] {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--t1);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    outline: none;
+    transition: border-color .15s;
+  }
+
+  input:focus { border-color: var(--acc); }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--acc);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    white-space: nowrap;
+  }
+
+  .btn:hover { background: var(--acc2); }
+  .btn:active { transform: scale(0.97); }
+
+  .btn.danger {
+    background: transparent;
+    border: 1px solid var(--red);
+    color: var(--red2);
+  }
+  .btn.danger:hover { background: rgba(224,80,80,.12); }
+
+  .btn.secondary {
+    background: var(--bg4);
+    color: var(--t1);
+    border: 1px solid var(--border);
+  }
+  .btn.secondary:hover { background: var(--bg3); border-color: var(--acc); }
+
+  .btn.sm {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-radius: 6px;
+  }
+
+  .btn.icon-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--t2);
+    padding: 6px 10px;
+    border-radius: 6px;
+  }
+  .btn.icon-btn:hover { border-color: var(--acc); color: var(--acc); background: transparent; }
+
+  .err-msg {
+    font-size: 12px;
+    color: var(--red2);
+    margin-top: -12px;
+    margin-bottom: 16px;
+    display: none;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .err-msg.show { display: block; }
+
+  /* ── MAIN DASHBOARD ── */
+  #dashboard { display: none; flex: 1; flex-direction: column; }
+
+  .dash-toolbar {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 32px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .stat-pill {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--t2);
+  }
+
+  .stat-pill strong {
+    color: var(--t1);
+    font-size: 14px;
+    margin-right: 4px;
+  }
+
+  .toolbar-spacer { flex: 1; }
+
+  .search-wrap {
+    position: relative;
+  }
+
+  .search-wrap svg {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--t3);
+    width: 14px;
+    height: 14px;
+  }
+
+  .search-wrap input {
+    width: 220px;
+    padding-left: 32px;
+    margin-bottom: 0;
+  }
+
+  /* ── TABLE ── */
+  .table-wrap {
+    flex: 1;
+    padding: 24px 32px;
+    overflow: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--t3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background .1s;
+  }
+
+  tbody tr:hover { background: var(--bg2); }
+
+  tbody td {
+    padding: 12px 14px;
+    vertical-align: middle;
+  }
+
+  .user-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .user-av {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1.5px solid var(--border);
+    flex-shrink: 0;
+    background: var(--bg4);
+  }
+
+  .user-av-initials {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--bg4);
+    border: 1.5px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--acc);
+    flex-shrink: 0;
+  }
+
+  .user-name { font-weight: 600; color: var(--t1); }
+  .user-display { font-size: 11px; color: var(--t2); margin-top: 1px; }
+
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .badge.ghost { background: rgba(80,200,120,.12); color: var(--green); }
+  .badge.warn { background: rgba(240,192,64,.12); color: var(--yellow); }
+  .badge.ok { background: rgba(74,144,212,.1); color: var(--blue); }
+
+  .actions-cell { display: flex; gap: 6px; align-items: center; }
+
+  /* ── CONFIRM MODAL ── */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.7);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+  }
+  .overlay.show { display: flex; }
+
+  .modal {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 400px;
+    width: 90%;
+  }
+
+  .modal h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    color: var(--red2);
+    margin-bottom: 10px;
+  }
+
+  .modal p {
+    font-size: 13px;
+    color: var(--t2);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+  /* ── TOAST ── */
+  .toasts {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 9999;
+  }
+
+  .toast {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: slideIn .2s ease;
+    max-width: 320px;
+  }
+
+  .toast.success { border-left: 3px solid var(--green); }
+  .toast.error { border-left: 3px solid var(--red2); }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* ── LOADING ── */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 80px;
+    color: var(--t3);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    gap: 12px;
+  }
+
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--acc);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty {
+    text-align: center;
+    padding: 60px;
+    color: var(--t3);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-logo">
+    <svg class="logo-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="24" cy="30" rx="15" ry="12" fill="url(#ag1)"/>
+      <ellipse cx="24" cy="26" rx="11" ry="9" fill="url(#ag2)"/>
+      <ellipse cx="24" cy="22" rx="8" ry="7" fill="url(#ag3)"/>
+      <ellipse cx="24" cy="19" rx="5" ry="4.5" fill="url(#ag4)"/>
+      <defs>
+        <linearGradient id="ag1" x1="9" y1="18" x2="39" y2="42" gradientUnits="userSpaceOnUse"><stop stop-color="#c8854a"/><stop offset="1" stop-color="#7a4020"/></linearGradient>
+        <linearGradient id="ag2" x1="13" y1="17" x2="35" y2="35" gradientUnits="userSpaceOnUse"><stop stop-color="#d4a060"/><stop offset="1" stop-color="#8a5030"/></linearGradient>
+        <linearGradient id="ag3" x1="16" y1="15" x2="32" y2="29" gradientUnits="userSpaceOnUse"><stop stop-color="#e0b878"/><stop offset="1" stop-color="#a06040"/></linearGradient>
+        <linearGradient id="ag4" x1="19" y1="14" x2="29" y2="24" gradientUnits="userSpaceOnUse"><stop stop-color="#ecc890"/><stop offset="1" stop-color="#c08050"/></linearGradient>
+      </defs>
+    </svg>
+    <div>
+      <div class="header-title">CacaChat Admin</div>
+      <div class="header-sub">User Management Console</div>
+    </div>
+  </div>
+  <div class="header-spacer"></div>
+  <div class="status-chip">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Not connected</span>
+  </div>
+</div>
+
+<!-- AUTH -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <h2>⚙ Admin Login</h2>
+    <p>Enter your server URL and Admin Key to access the user management console.<br>Set <code style="color:var(--acc);font-size:11px">ADMIN_KEY</code> as an environment variable on your server.</p>
+
+    <div class="field-label">Server URL</div>
+    <div class="field-row" style="flex-direction:column;gap:6px">
+      <input type="url" id="server-url" placeholder="https://cacachat-production.up.railway.app" value="https://cacachat-production.up.railway.app"/>
+    </div>
+
+    <div class="field-label">Admin Key</div>
+    <div class="field-row" style="flex-direction:column;gap:6px">
+      <input type="password" id="admin-key" placeholder="Your ADMIN_KEY value" onkeydown="if(event.key==='Enter')connect()"/>
+    </div>
+
+    <div class="err-msg" id="auth-err"></div>
+
+    <button class="btn" onclick="connect()" style="width:100%;justify-content:center">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+      Connect
+    </button>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard">
+  <div class="dash-toolbar">
+    <div class="stat-pill"><strong id="stat-total">—</strong> users</div>
+    <div class="stat-pill" id="stat-dupes-wrap" style="display:none"><strong id="stat-dupes" style="color:var(--yellow)">—</strong> issues</div>
+    <button class="btn secondary sm" onclick="loadUsers()" title="Refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      Refresh
+    </button>
+    <button class="btn secondary sm" onclick="runFix()" title="Fix orphan/ghost index entries">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      Fix Issues
+    </button>
+    <div class="toolbar-spacer"></div>
+    <div class="search-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="search-input" placeholder="Filter users…" oninput="filterTable(this.value)"/>
+    </div>
+    <button class="btn icon-btn" onclick="disconnect()" title="Disconnect">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    </button>
+  </div>
+  <div class="table-wrap">
+    <div id="table-container"></div>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div class="overlay" id="confirm-overlay">
+  <div class="modal">
+    <h3>⚠ Delete User</h3>
+    <p id="confirm-msg"></p>
+    <div class="modal-actions">
+      <button class="btn secondary" onclick="closeConfirm()">Cancel</button>
+      <button class="btn danger" id="confirm-ok">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOASTS -->
+<div class="toasts" id="toasts"></div>
+
+<script>
+let serverUrl = '';
+let adminKey = '';
+let allUsers = [];
+
+function connect() {
+  const url = document.getElementById('server-url').value.trim().replace(/\/$/, '');
+  const key = document.getElementById('admin-key').value.trim();
+  const errEl = document.getElementById('auth-err');
+  errEl.classList.remove('show');
+  if (!url) { errEl.textContent = 'Server URL is required.'; errEl.classList.add('show'); return; }
+  if (!key) { errEl.textContent = 'Admin Key is required.'; errEl.classList.add('show'); return; }
+  serverUrl = url;
+  adminKey = key;
+  loadUsers();
+}
+
+function disconnect() {
+  serverUrl = ''; adminKey = '';
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('status-dot').className = 'status-dot';
+  document.getElementById('status-text').textContent = 'Not connected';
+}
+
+async function loadUsers() {
+  document.getElementById('table-container').innerHTML = '<div class="loading"><div class="spinner"></div>Loading users…</div>';
+  try {
+    const res = await fetch(`${serverUrl}/api/admin/users?key=${encodeURIComponent(adminKey)}`);
+    if (res.status === 403) {
+      showToast('error', 'Wrong admin key or access denied.');
+      document.getElementById('table-container').innerHTML = '<div class="empty">Access denied. Check your admin key.</div>';
+      return;
+    }
+    const data = await res.json();
+    if (data.error) { showToast('error', data.error); return; }
+
+    allUsers = data.users || [];
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'flex';
+    document.getElementById('status-dot').className = 'status-dot connected';
+    document.getElementById('status-text').textContent = 'Connected';
+
+    renderTable(allUsers);
+  } catch (err) {
+    showToast('error', 'Could not reach server: ' + err.message);
+    document.getElementById('table-container').innerHTML = '<div class="empty">Could not connect. Check the server URL.</div>';
+    document.getElementById('auth-screen').style.display = 'flex';
+    document.getElementById('dashboard').style.display = 'none';
+  }
+}
+
+function renderTable(users) {
+  const total = users.length;
+  const issues = users.filter(u => u.duplicate).length;
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-dupes').textContent = issues;
+  document.getElementById('stat-dupes-wrap').style.display = issues > 0 ? '' : 'none';
+
+  if (users.length === 0) {
+    document.getElementById('table-container').innerHTML = '<div class="empty">No users found.</div>';
+    return;
+  }
+
+  let html = `
+    <table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Username</th>
+          <th>Email</th>
+          <th>Created</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="user-tbody">`;
+
+  users.forEach(u => {
+    const initials = (u.name || u.username || '?').split(' ').map(w => w[0] || '').join('').toUpperCase().slice(0, 2);
+    const avatar = u.avatarUrl
+      ? `<img class="user-av" src="${esc(u.avatarUrl)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+      : '';
+    const avInitials = `<div class="user-av-initials" style="${u.avatarUrl ? 'display:none' : ''}">${esc(initials)}</div>`;
+    const created = u.created ? new Date(u.created).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+    const statusBadge = u.duplicate
+      ? `<span class="badge warn">⚠ Issue</span>`
+      : `<span class="badge ok">✓ OK</span>`;
+
+    html += `<tr data-username="${esc(u.username)}" data-searchtext="${esc((u.username + ' ' + u.name + ' ' + u.email).toLowerCase())}">
+      <td>
+        <div class="user-cell">
+          ${avatar}${avInitials}
+          <div>
+            <div class="user-name">${esc(u.name || '—')}</div>
+            <div class="user-display">${u.duplicate ? '<span style="color:var(--yellow)">' + esc(u.email) + '</span>' : esc(u.email)}</div>
+          </div>
+        </div>
+      </td>
+      <td><span class="mono">@${esc(u.username)}</span></td>
+      <td><span class="mono" style="color:var(--t2);font-size:11px">${esc(u.email)}</span></td>
+      <td><span style="color:var(--t2);font-size:12px">${created}</span></td>
+      <td>${statusBadge}</td>
+      <td>
+        <div class="actions-cell">
+          <button class="btn danger sm" onclick="confirmDelete('${esc(u.username)}', '${esc(u.name || u.username)}')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+function filterTable(q) {
+  const rows = document.querySelectorAll('#user-tbody tr');
+  const ql = q.toLowerCase();
+  rows.forEach(row => {
+    const txt = row.dataset.searchtext || '';
+    row.style.display = txt.includes(ql) ? '' : 'none';
+  });
+}
+
+// ── FIX ISSUES ──
+async function runFix() {
+  try {
+    const res = await fetch(`${serverUrl}/api/admin/fix`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: adminKey })
+    });
+    const data = await res.json();
+    if (data.error) { showToast('error', data.error); return; }
+    const total = (data.fixed?.length || 0) + (data.removed?.length || 0);
+    if (total === 0) {
+      showToast('success', 'No issues found — everything looks clean!');
+    } else {
+      showToast('success', `Fixed ${data.fixed?.length || 0}, removed ${data.removed?.length || 0} entries.`);
+      console.log('Fixed:', data.fixed);
+      console.log('Removed:', data.removed);
+    }
+    loadUsers();
+  } catch (err) {
+    showToast('error', 'Fix failed: ' + err.message);
+  }
+}
+
+// ── DELETE ──
+let pendingDelete = null;
+
+function confirmDelete(username, displayName) {
+  pendingDelete = username;
+  document.getElementById('confirm-msg').innerHTML =
+    `You are about to permanently delete <strong style="color:var(--t1)">@${esc(username)}</strong> (${esc(displayName)}).<br><br>
+    This removes their account, username reservation, and social data. <strong style="color:var(--red2)">This cannot be undone.</strong>`;
+  document.getElementById('confirm-overlay').classList.add('show');
+  document.getElementById('confirm-ok').onclick = () => deleteUser(username);
+}
+
+function closeConfirm() {
+  document.getElementById('confirm-overlay').classList.remove('show');
+  pendingDelete = null;
+}
+
+async function deleteUser(username) {
+  closeConfirm();
+  try {
+    const res = await fetch(`${serverUrl}/api/admin/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: adminKey, username })
+    });
+    const data = await res.json();
+    if (data.error) { showToast('error', data.error); return; }
+    showToast('success', `@${username} deleted. ${data.note ? '(' + data.note + ')' : ''}`);
+    allUsers = allUsers.filter(u => u.username !== username);
+    renderTable(allUsers);
+  } catch (err) {
+    showToast('error', 'Delete failed: ' + err.message);
+  }
+}
+
+// ── UTILS ──
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showToast(type, msg) {
+  const c = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.innerHTML = (type === 'success'
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:14px;height:14px;color:var(--green);flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:14px;height:14px;color:var(--red2);flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>')
+    + `<span>${esc(msg)}</span>`;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(() => t.remove(), 300); }, 4000);
+}
+
+// Close confirm on overlay click
+document.getElementById('confirm-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('confirm-overlay')) closeConfirm();
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeConfirm();
+});
+</script>
+</body>
+</html>
